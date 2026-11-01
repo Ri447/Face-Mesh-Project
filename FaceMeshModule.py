@@ -22,7 +22,7 @@ class FaceMeshDetector():
         self.results = None
         self.foreheadIds=[10,67,69,103,104,108,109,297,299,332,333,337,338]
 
-    def findFaceMesh(self,img,draw=True):
+    def findFaceMesh(self,img,draw=False):
         self.imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         self.results = self.faceMesh.process(self.imgRGB)
         # faces=[]
@@ -69,12 +69,46 @@ class FaceMeshDetector():
         lmList = self.findPosition(img, faceNo)
         return [lm for lm in lmList if lm[0] in featureIds]
 
+
+    def drawFeatureLandmarks(self, img, feature="left_eye",
+                             faceNo=0, color=(0, 255, 0)):
+        featureConnections = {
+            "left_eye": self.mpFaceMesh.FACEMESH_LEFT_EYE,
+            "right_eye": self.mpFaceMesh.FACEMESH_RIGHT_EYE,
+            "lips": self.mpFaceMesh.FACEMESH_LIPS,
+            "nose": self.mpFaceMesh.FACEMESH_NOSE
+        }
+        if feature not in featureConnections:
+            raise ValueError("Invalid facial feature")
+        if not self.results or not self.results.multi_face_landmarks:
+            return img
+        face = self.results.multi_face_landmarks[faceNo]
+        ih, iw, ic = img.shape
+        connections = featureConnections[feature]
+        for start, end in connections:
+            lm1 = face.landmark[start]
+            lm2 = face.landmark[end]
+            x1, y1 = int(lm1.x * iw), int(lm1.y * ih)
+            x2, y2 = int(lm2.x * iw), int(lm2.y * ih)
+            cv2.line(img, (x1, y1), (x2, y2), color, 1)
+            cv2.circle(img, (x1, y1), 2, color, cv2.FILLED)
+            cv2.circle(img, (x2, y2), 2, color, cv2.FILLED)
+        return img
+
+
     def getForeheadLandmarks(self, img, faceNo=0):
         lmList = self.findPosition(img, faceNo)
         return [
             lm for lm in lmList
             if lm[0] in self.foreheadIds
         ]
+
+    def drawForeheadLandmarks(self, img, faceNo=0):
+        forehead = self.getForeheadLandmarks(img, faceNo)
+        for lm in forehead:
+            _, x, y, z = lm
+            cv2.circle(img, (x, y), 4, (0, 255, 255), cv2.FILLED)
+        return img
 
     def findDistance(self, p1, p2):
         return math.dist(p1, p2)
@@ -114,13 +148,32 @@ class FaceMeshDetector():
 
         return vertical / horizontal
 
+
+    def getMouthStatus(self, img, faceNo=0, threshold=0.15):
+        mar = self.getMouthAspectRatio(img, faceNo)
+        if mar is None:
+            return None
+        if mar > threshold:
+            return "OPEN"
+        return "CLOSED"
+
+
 def main():
     cap = cv2.VideoCapture(1)
     # pTime = 0
     detector = FaceMeshDetector()
     while True:
         success, img = cap.read()
-        img=detector.findFaceMesh(img)
+        if not success:
+            print("Failed to read webcam frame")
+            break
+        img = detector.findFaceMesh(img, draw=False)
+        img = detector.drawFeatureLandmarks(img, "left_eye", color=(0, 255, 0))
+        img = detector.drawFeatureLandmarks(img, "right_eye", color=(0, 255, 0))
+        img = detector.drawFeatureLandmarks(img, "lips", color=(255, 0, 255))
+        img = detector.drawFeatureLandmarks(img, "nose", color=(255, 0, 0))
+        img = detector.drawForeheadLandmarks(img)
+
         lmList = detector.findPosition(img)
         eyes = detector.getFeatureLandmarks(img, "left_eye")
         lips = detector.getFeatureLandmarks(img, "lips")
@@ -128,26 +181,24 @@ def main():
         forehead = detector.getForeheadLandmarks(img)
         ear = detector.getEyeAspectRatio(img)
         mar = detector.getMouthAspectRatio(img)
+        mouthStatus = detector.getMouthStatus(img)
+        if mouthStatus is not None:
+            cv2.putText(img, f"Mouth: {mouthStatus}", (20, 150),cv2.FONT_HERSHEY_SIMPLEX, 0.8,(0, 255, 0), 2)
         if ear is not None:
-            cv2.putText(
-                img, f"EAR: {ear:.3f}", (20, 70),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8,
-                (0, 255, 0), 2
-            )
+            cv2.putText(img, f"EAR: {ear:.3f}", (20, 70),cv2.FONT_HERSHEY_SIMPLEX, 0.8,(0, 255, 0), 2)
         if mar is not None:
-            cv2.putText(
-                img, f"MAR: {mar:.3f}", (20, 110),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8,
-                (0, 255, 0), 2
-            )
+            cv2.putText(img, f"MAR: {mar:.3f}", (20, 110),cv2.FONT_HERSHEY_SIMPLEX, 0.8,(0, 255, 0), 2)
         # cTime = time.time()
         # fps = 1 / (cTime - pTime)
         # pTime = cTime
         # cv2.putText(img, f'FPS:{int(fps)}', (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 3, (0, 255, 0), 3)
 
         cv2.imshow("Image", img)
-        cv2.waitKey(1)
-
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    cap.release()
+    detector.faceMesh.close()
+    cv2.destroyAllWindows()
 
 if __name__=='__main__':
     main()
