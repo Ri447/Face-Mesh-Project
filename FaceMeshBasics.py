@@ -23,7 +23,6 @@ while True:
                x,y=int(lm.x*iw), int(lm.y*ih)
                print(id,x,y)
 
-
     cTime=time.time()
     fps=1/(cTime-pTime)
     pTime=cTime
